@@ -38,7 +38,6 @@ I really like the goals defined in the article by [M. Hobbhahn](https://www.less
 ## Further Investigations
 
 
-
 ## Additional resources
 
 - [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
