@@ -7,7 +7,8 @@ common architectures and how it can be intuitively understood.
 ## Getting Started
 
 > What I cannot create, I do not understand
-Richard P. Feynman
+> 
+> <cite>Richard P. Feynman</cite>
 
 I strongly believe that building something will actually force you to gain a profound understanding of it, otherwise you will fail.
 This is probably true in almost all cases as the citation of Feynman indicates. Please prove me wrong by contradiction. Therefore, we rely on that assumption for the transformer as well.
@@ -35,3 +36,10 @@ I really like the goals defined in the article by [M. Hobbhahn](https://www.less
 
 
 ## Further Investigations
+
+
+
+## Additional resources
+
+- [The Illustrated Transformer](https://jalammar.github.io/illustrated-transformer/)
+- [The Transformer Family](https://lilianweng.github.io/posts/2020-04-07-the-transformer-family/)
