@@ -3,7 +3,7 @@ import argparse
 import sys
 import numpy as np
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear
+from tinygrad.nn import Linear, Embedding
 
 DEBUG = False
 
@@ -21,9 +21,7 @@ def create_arg_parser():
     return parser
 
 
-def datasets(
-    s: str = "data/tinyshakespeare/input.txt", block_size: int = 8, batch_size: int = 8
-):
+def datasets(s: str = "data/tinyshakespeare/input.txt") -> tuple[list]:
     """Prepare and return dataset splits."""
     with open(s, "r") as f:
         d = f.read()
@@ -32,39 +30,41 @@ def datasets(
     # encode
     encode = lambda x: list(map(lambda c: chars[c], x))
     # train/val/test split of dataset
-    d_tr = Tensor(encode(d[: int(len(d) * 0.8)]))
-    d_v = Tensor(encode(d[int(len(d) * 0.8) : int(len(d) * 0.9)]))
-    d_t = Tensor(encode(d[int(len(d) * 0.9) :]))
+    d_tr = encode(d[: int(len(d) * 0.8)])
+    d_v = encode(d[int(len(d) * 0.8) : int(len(d) * 0.9)])
+    d_t = encode(d[int(len(d) * 0.9) :])
 
     return d_tr, d_v, d_t
 
 
-def get_train_batch(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
+def get_train_batch(d_tr: Tensor, block_size: int = 8, batch_size: int = 4):
     """Extract a single batch of training data."""
-    idx = np.random.randint(0, d_tr.shape[0] - block_size, (batch_size,))
-    x = np.stack([d_tr[i : i + block_size] for i in idx])
-    y = np.stack([d_tr[i + 1 : i + block_size + 1] for i in idx])
+    idx = np.random.randint(0, len(d_tr) - block_size, (batch_size,))
+    x = Tensor(np.stack([d_tr[i : i + block_size] for i in idx]))
+    y = Tensor(np.stack([d_tr[i + 1 : i + block_size + 1] for i in idx]))
     return x, y
 
 
-def attention_layer(q, k, v, mask=None):
+def attention_layer(q, k, v, mask=None, dropout_p=0.1):
     """ "Scaled Dot-Product Attention."""
-    # matmul
-    x = q.matmul(k)
+    x = q @ k.transpose(-2, -1)
     # scale
     x = x / np.sqrt(k.shape[1])
     # mask
     if mask is not None:
-        pass
+        mask = (mask == 0).where(-float("inf"), mask)
+        x = x + mask
     # softmax
-    x = x.softmax()
-    # matmul
-    return x.matmul(v)
+    x = x.softmax(-1)
+    # dropout
+    x = x.dropout(dropout_p)
+    return x @ v
 
 
 class Transformer:
-    def __init__(self, channels: int = 256, heads: int = 8, depth: int = 6):
+    def __init__(self, channels: int = 32, heads: int = 8, depth: int = 6):
         """."""
+        self.embed = Embedding(heads, channels)
         self.q = Linear(channels, heads)
         self.k = Linear(channels, heads)
 
@@ -73,7 +73,15 @@ class Transformer:
 
         :param x: input sequence. (B, T, C)
         """
-        return attention_layer(self.q(x), self.k(x), x)
+        x = self.embed(x)
+        return attention_layer(
+            self.q(x),
+            self.k(x),
+            x,
+            mask=Tensor(
+                np.ones((x.shape[1], x.shape[1])).astype(dtype=np.float32)
+            ).tril(),
+        )
 
 
 def train(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
@@ -112,9 +120,6 @@ def main():
 
     # train/val/test split of dataset
     d_tr = Tensor(encode(d[: int(len(d) * 0.8)]))
-    d_v = Tensor(encode(d[int(len(d) * 0.8) : int(len(d) * 0.9)]))
-    d_t = Tensor(encode(d[int(len(d) * 0.9) :]))
-
     if DEBUG:
         block_size = 8
         # This is referred to as the time dimension
@@ -145,12 +150,16 @@ def main():
             bow[0],
         )
 
+    # Transformer Model Instatiation
     transformer = Transformer()
-
     # train
-    x, y = get_train_batch(d_tr)
-    out = transformer.forward(x)
+    train_d, _, _ = datasets()
+    x, y = get_train_batch(train_d)
+    if DEBUG:
+        print("\nTRAINING")
+        print(f"(data) single batch:  x: {x.shape}, y: {y.shape}")
 
+    out = transformer.forward(x)
     print(out.shape)
 
 
