@@ -3,6 +3,7 @@ import argparse
 import sys
 import numpy as np
 from tinygrad.tensor import Tensor
+from tinygrad.nn import Linear
 
 DEBUG = False
 
@@ -38,10 +39,18 @@ def datasets(
     return d_tr, d_v, d_t
 
 
+def get_train_batch(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
+    """Extract a single batch of training data."""
+    idx = np.random.randint(0, d_tr.shape[0] - block_size, (batch_size,))
+    x = np.stack([d_tr[i : i + block_size] for i in idx])
+    y = np.stack([d_tr[i + 1 : i + block_size + 1] for i in idx])
+    return x, y
+
+
 def attention_layer(q, k, v, mask=None):
     """ "Scaled Dot-Product Attention."""
     # matmul
-    x = q.matmul(k.transpose())
+    x = q.matmul(k)
     # scale
     x = x / np.sqrt(k.shape[1])
     # mask
@@ -53,9 +62,18 @@ def attention_layer(q, k, v, mask=None):
     return x.matmul(v)
 
 
-def transformer():
-    """."""
-    pass
+class Transformer:
+    def __init__(self, channels: int = 256, heads: int = 8, depth: int = 6):
+        """."""
+        self.q = Linear(channels, heads)
+        self.k = Linear(channels, heads)
+
+    def forward(self, x):
+        """Forward pass of the transformer.
+
+        :param x: input sequence. (B, T, C)
+        """
+        return attention_layer(self.q(x), self.k(x), x)
 
 
 def train(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
@@ -97,8 +115,8 @@ def main():
     d_v = Tensor(encode(d[int(len(d) * 0.8) : int(len(d) * 0.9)]))
     d_t = Tensor(encode(d[int(len(d) * 0.9) :]))
 
-    block_size = 8
     if DEBUG:
+        block_size = 8
         # This is referred to as the time dimension
         print("CONTEXT BLOCKS")
         x = d_tr[:block_size].numpy()
@@ -108,15 +126,32 @@ def main():
             print(f"{x[:i+1]} := {y[i]}")
             print(f"{decode(x[:i+1])} := {decode([y[i]])}")
 
-    # x = attention_layer(q, k, v)
-    # print(x)
+    # Mathematical intuition behind the attention mechanism
+    if DEBUG:
+        print("\nATTENTION MECHANISM (IDEA). AVERAGING.")
+        b, t, c = 4, 8, 2
+        x = Tensor(np.random.rand(b, t, c).astype(dtype=np.float32))
 
-    b, t, c = 4, 8, 2
-    q = Tensor(np.random.rand(b, t, c).astype(dtype=np.float32))
-    print(q)
+        bow = np.zeros((b, t, c)).astype(dtype=np.float32)
+        for b in range(x.shape[0]):
+            for t in range(x.shape[1]):
+                prev = x[b, : t + 1, :]
+                bow[b, t, :] = np.mean(prev.numpy(), axis=0)
 
-    bow = np.zeros((b, t, c)).astype(dtype=np.float32)
-    print(bow)
+        print(
+            "Random data sample: \n",
+            x.numpy()[0],
+            "\n\nAverage up to the previous tokens: \n",
+            bow[0],
+        )
+
+    transformer = Transformer()
+
+    # train
+    x, y = get_train_batch(d_tr)
+    out = transformer.forward(x)
+
+    print(out.shape)
 
 
 if __name__ == "__main__":
