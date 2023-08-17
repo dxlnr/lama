@@ -1,9 +1,41 @@
 # GPT-X
+import argparse
+import sys
 import numpy as np
 from tinygrad.tensor import Tensor
-# from tinygrad.nn import Linear
 
-DEBUG = True
+DEBUG = False
+
+
+def create_arg_parser():
+    """Get arguments from command lines."""
+    parser = argparse.ArgumentParser(description="GPT-X")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Be verbose",
+        action="store_true",
+        dest="loglevel",
+    )
+    return parser
+
+
+def datasets(
+    s: str = "data/tinyshakespeare/input.txt", block_size: int = 8, batch_size: int = 8
+):
+    """Prepare and return dataset splits."""
+    with open(s, "r") as f:
+        d = f.read()
+    # lut
+    chars = {c: i for i, c in enumerate(sorted(set(d)))}
+    # encode
+    encode = lambda x: list(map(lambda c: chars[c], x))
+    # train/val/test split of dataset
+    d_tr = Tensor(encode(d[: int(len(d) * 0.8)]))
+    d_v = Tensor(encode(d[int(len(d) * 0.8) : int(len(d) * 0.9)]))
+    d_t = Tensor(encode(d[int(len(d) * 0.9) :]))
+
+    return d_tr, d_v, d_t
 
 
 def attention_layer(q, k, v, mask=None):
@@ -29,12 +61,20 @@ def transformer():
 def train(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
     """."""
     for batch in range(batch_size):
-        for t in range(block_size): 
+        for t in range(block_size):
             pass
 
 
 def main():
     """."""
+    # Parse command line arguements.
+    arg_parser = create_arg_parser()
+    args = arg_parser.parse_args(sys.argv[1:])
+    try:
+        DEBUG = args.loglevel
+    except ValueError:
+        pass
+
     # dataset
     with open("data/tinyshakespeare/input.txt", "r") as f:
         d = f.read()
@@ -62,7 +102,7 @@ def main():
         # This is referred to as the time dimension
         print("CONTEXT BLOCKS")
         x = d_tr[:block_size].numpy()
-        y = d_tr[1:block_size + 1].numpy()
+        y = d_tr[1 : block_size + 1].numpy()
 
         for i in range(block_size):
             print(f"{x[:i+1]} := {y[i]}")
@@ -70,6 +110,13 @@ def main():
 
     # x = attention_layer(q, k, v)
     # print(x)
+
+    b, t, c = 4, 8, 2
+    q = Tensor(np.random.rand(b, t, c).astype(dtype=np.float32))
+    print(q)
+
+    bow = np.zeros((b, t, c)).astype(dtype=np.float32)
+    print(bow)
 
 
 if __name__ == "__main__":

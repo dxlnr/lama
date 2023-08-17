@@ -34,6 +34,13 @@ I really like the goals defined in the article by [M. Hobbhahn](https://www.less
 - Reproduce the grokking phenomenon (see e.g. [Neel’s and Tom’s piece](https://www.lesswrong.com/posts/N6WM6hs7RQMKDhYjB/a-mechanistic-interpretability-analysis-of-grokking)). 
 - Answer some of the questions in [Jacob Hilton's post](https://github.com/jacobhilton/deep_learning_curriculum/blob/master/1-Transformers.md).
 
+## Implementation
+
+```bash
+python transformer.py
+# Add -v for more output.
+python transformer.py -v
+```
 
 ## Further Investigations
 
