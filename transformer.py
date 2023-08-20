@@ -46,60 +46,76 @@ def get_train_batch(d_tr: Tensor, block_size: int = 8, batch_size: int = 4):
 
 
 class TransformerBlock:
-    def __init__(self, channels: int = 64, heads: int = 8):
+    def __init__(
+        self,
+        channels: int = 512,
+        heads: int = 8,
+        d_ff: int = 2048,
+        act=lambda x: x.relu(),
+        dropout_p: float = 0.1,
+    ):
         """."""
         self.channels = channels
         self.heads = heads
+        self.dropout = dropout_p
+        self.act = act
 
         self.q = (Tensor.uniform(channels, channels), Tensor.zeros(channels))
         self.k = (Tensor.uniform(channels, channels), Tensor.zeros(channels))
         self.v = (Tensor.uniform(channels, channels), Tensor.zeros(channels))
 
-        self.embed = Embedding(heads, channels)
-        # self.q = Linear(channels, heads)
-        # self.k = Linear(channels, heads)
+        self.la = Linear(channels, channels)
+        self.l1 = Linear(channels, d_ff)
+        self.l2 = Linear(d_ff, channels)
 
     def __call__(self, x):
         """Forward pass of the transformer.
 
         :param x: input sequence. (B, T, C) where B: batch size, T: time and C: channels or embedded dim.
         """
-        x = self.multi_head_attention(
+        x = x + self.multi_head_attention(
             x,
-            mask=Tensor(
-                np.ones((x.shape[1], x.shape[1])).astype(dtype=np.float32)
-            ).tril(),
-        )
+            # mask=Tensor(
+            #     np.ones((x.shape[1], x.shape[1])).astype(dtype=np.float32)
+            # ).tril(),
+        ).dropout(self.dropout)
+        x = x.layernorm()
 
-    def attention_layer(self, mask=None, dropout_p=0.1):
+        x = x + self.act(self.l2(self.act(self.l1(x))))
+        x = x.layernorm()
+        return x
+
+    def attention_layer(self, q, k, v, mask=None, dropout_p=0.1):
         """ "Scaled Dot-Product Attention."""
-        x = self.q @ self.k.transpose(-2, -1)
+        x = q @ k.transpose(-2, -1)
         # scale
-        x = x / np.sqrt(self.k.shape[1])
+        x = x / np.sqrt(k.shape[-1])
         # mask
         if mask is not None:
             mask = (mask == 0).where(-float("inf"), mask)
-            x = x + mask
+            x = x + mask.transpose(-2, -1)
         # softmax
         x = x.softmax(-1)
         # dropout
         x = x.dropout(dropout_p)
-        return x @ self.v
+        return x @ v
 
     def multi_head_attention(
         self, x, heads: int = 8, head_size: int = 8, mask=None, dropout_p: float = 0.1
     ):
         """Multi-Head Attention."""
-        # split heads
+        # split heads: (B, T, C) -> (B, T, H, C/H)
+        # (batch_size, sequence_length, num_heads, d_model/num_heads)
         q, k, v = [
             x.linear(*y)
             .reshape(shape=(x.shape[0], -1, heads, head_size))
             .transpose(1, 2)
             for y in [self.q, self.k, self.v]
         ]
-        print(q.shape, k.shape, v.shape)
-        # x = attention_layer(q, k, v, mask, dropout_p).transpose(1,2)
-        # return x
+        x = self.attention_layer(q, k, v, mask, self.dropout)
+        x = self.la(x.reshape(shape=(x.shape[0], -1, x.shape[-1] * x.shape[-2])))
+        # returns (B, T, C)
+        return x
 
 
 def train(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
@@ -178,9 +194,10 @@ def main():
         print(f"(data) single batch:  x: {x.shape}, y: {y.shape}")
 
     # forward pass
-    x = Embedding(8, 64)(x)
+    x = Embedding(16, 512)(x)
     out = transformer(x)
-    print(out.shape)
+    if DEBUG:
+        print("(TransformerBlock) out", out.shape)
 
 
 if __name__ == "__main__":
