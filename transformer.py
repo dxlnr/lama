@@ -1,9 +1,11 @@
 # GPT-X
 import argparse
 import sys
+from dataclasses import dataclass
+
 import numpy as np
+from tinygrad.nn import Embedding, Linear
 from tinygrad.tensor import Tensor
-from tinygrad.nn import Linear, Embedding
 
 DEBUG = False
 
@@ -45,12 +47,21 @@ def get_train_batch(d_tr: Tensor, block_size: int = 8, batch_size: int = 4):
     return x, y
 
 
+@dataclass
+class GPTConfig:
+    block_size: int = 1024
+    vocab_size: int = 50304  # From the GPT-2 Paper
+    layers: int = 6
+    heads: int = 12
+    channels: int = 512
+    dropout: float = 0.0
+
+
 class TransformerBlock:
     def __init__(
         self,
         channels: int = 512,
         heads: int = 8,
-        d_ff: int = 2048,
         act=lambda x: x.relu(),
         dropout_p: float = 0.1,
     ):
@@ -65,11 +76,14 @@ class TransformerBlock:
         self.v = (Tensor.uniform(channels, channels), Tensor.zeros(channels))
 
         self.la = Linear(channels, channels)
-        self.l1 = Linear(channels, d_ff)
-        self.l2 = Linear(d_ff, channels)
+        self.l1 = Linear(channels, channels)
+        self.l2 = Linear(channels, channels)
+
+        self.mlp1 = Linear(channels, 4 * channels)
+        self.mlp2 = Linear(4 * channels, channels)
 
     def __call__(self, x):
-        """Forward pass of the transformer.
+        """Forward pass of a single transformer block.
 
         :param x: input sequence. (B, T, C) where B: batch size, T: time and C: channels or embedded dim.
         """
@@ -79,10 +93,10 @@ class TransformerBlock:
             #     np.ones((x.shape[1], x.shape[1])).astype(dtype=np.float32)
             # ).tril(),
         ).dropout(self.dropout)
-        x = x.layernorm()
+        x = self.l1(x.layernorm())
 
-        x = x + self.act(self.l2(self.act(self.l1(x))))
-        x = x.layernorm()
+        x = x + self.mlp2(self.act(self.mlp1(x))).dropout(self.dropout)
+        x = self.l2(x.layernorm())
         return x
 
     def attention_layer(self, q, k, v, mask=None, dropout_p=0.1):
@@ -116,6 +130,22 @@ class TransformerBlock:
         x = self.la(x.reshape(shape=(x.shape[0], -1, x.shape[-1] * x.shape[-2])))
         # returns (B, T, C)
         return x
+
+
+class Transformer:
+    def __init__(self, conf: GPTConfig):
+        # token embeddings
+        self.te = (Embedding(conf.vocab_size, conf.channels),)
+        # positional embeddings
+        self.pe = (Embedding(conf.block_size, conf.channels),)
+        # Transformer Blocks
+        self.tbs = []
+        for i in range(conf.layers):
+            self.tbs.append(TransformerBlock(conf.channels, conf.heads))
+
+    def __call__(self, x):
+        """Forward pass of the transformer."""
+        pass
 
 
 def train(d_tr: Tensor, block_size: int = 8, batch_size: int = 8):
