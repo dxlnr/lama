@@ -1,16 +1,17 @@
 # GPT-X
 import argparse
+import functools
 import sys
 from dataclasses import dataclass
 from typing import Optional
 
 import numpy as np
-from tinygrad.nn import Embedding, LayerNorm, Linear
-from tinygrad.tensor import Tensor
-from tinygrad.state import torch_load
-from utils import fetch_as_file
-
 import tiktoken
+from tinygrad.nn import Embedding, Linear
+from tinygrad.state import load_state_dict, torch_load
+from tinygrad.tensor import Tensor
+
+from utils import fetch_as_file
 
 DEBUG = False
 
@@ -28,9 +29,9 @@ def create_arg_parser():
     return parser
 
 
-def get_url(model_size: str = 'gpt2'):
+def get_url(model_size: str = "gpt2"):
     """Get model url from huggingface."""
-    return f'https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin'
+    return f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"
 
 
 def datasets(s: str = "data/tinyshakespeare/input.txt") -> tuple[list]:
@@ -66,6 +67,116 @@ class GPTConfig:
     channels: int = 512
     dropout: float = 0.0
     bias: bool = False
+
+
+class LayerNorm:
+    def __init__(self, dim, eps=1e-5):
+        self.eps = eps
+        self.weight = Tensor.ones(dim)
+        self.bias = Tensor.zeros(dim)
+
+    def __call__(self, x: Tensor):
+        return (x.layernorm(eps=self.eps)) * self.weight + self.bias
+
+
+class MLP:
+    def __init__(self, dim, hidden_dim):
+        self.c_fc = Linear(dim, hidden_dim, bias=True)
+        self.c_proj = Linear(hidden_dim, dim, bias=True)
+
+    def __call__(self, x: Tensor) -> Tensor:
+        return self.c_proj(self.c_fc(x).gelu())
+
+
+class Attention:
+    def __init__(self, channels, heads):
+        self.c_attn = Linear(channels, 3 * channels, bias=True)
+        self.c_proj = Linear(channels, channels, bias=True)
+        self.heads = heads
+        self.channels = channels
+        self.head_size = channels // heads
+        self.dropout = 0.0
+
+    def __call__(self, x: Tensor, mask: Optional[Tensor] = None) -> Tensor:
+        B, T, C = x.shape
+        x = self.c_attn(x)
+        q, k, v = [
+            x.slice([None, None, (i * self.channels, (i + 1) * self.channels)])
+            for i in range(3)
+        ]
+        k = k.reshape(B, T, self.heads, C // self.heads).transpose(1, 2)
+        q = q.reshape(B, T, self.heads, C // self.heads).transpose(1, 2)
+        v = v.reshape(B, T, self.heads, C // self.heads).transpose(1, 2)
+        q, k, v = q.realize(), k.realize(), v.realize()
+
+        x = Tensor.scaled_dot_product_attention(
+            q, k, v, attn_mask=mask, dropout_p=self.dropout
+        )
+        x = x.reshape(shape=(B, -1, self.heads * self.head_size))
+        x = self.c_proj(x).dropout(self.dropout)
+        return x
+
+
+class GPTBlock:
+    def __init__(self, conf: GPTConfig):
+        self.attn = Attention(conf.channels, conf.heads)
+        self.mlp = MLP(conf.channels, 4 * conf.channels)
+        self.ln_1 = LayerNorm(conf.channels, eps=1e-5)
+        self.ln_2 = LayerNorm(conf.channels, eps=1e-5)
+
+    def __call__(
+        self, x: Tensor, start_idx: int = 0, mask: Optional[Tensor] = None
+    ) -> Tensor:
+        x = x + self.attn(self.ln_1(x))
+        x = x + self.mlp(self.ln_2(x))
+
+
+class GPT:
+    def __init__(self, conf: GPTConfig):
+        # token embeddings
+        self.wte = Embedding(conf.vocab_size, conf.channels)
+        # positional embeddings
+        self.wpe = Embedding(conf.block_size, conf.channels)
+        # Transformer Blocks
+        self.h = [GPTBlock(conf) for _ in range(conf.layers)]
+        # Layer Norm
+        self.ln_f = LayerNorm(conf.channels, eps=1e-5)
+        # final linear layer
+        self.lm_head = Linear(conf.channels, conf.vocab_size, bias=False)
+
+    def __call__(self, x: Tensor, start_idx: int = 0):
+        """Forward pass of the transformer."""
+        _, seqlen = x.shape
+        pos = Tensor(np.arange(start_idx, start_idx + seqlen)).reshape(shape=(1, -1))
+        h = self.wte(x) + self.wpe(pos)
+        print(h)
+
+        # mask = Tensor.full((1, 1, seqlen, start_idx + seqlen), float("-inf")).triu(start_idx + 1).realize() if seqlen > 1 else None
+        mask = None
+        h = h.sequential(
+            [functools.partial(n, start_idx=start_idx, mask=mask) for n in self.h]
+        )
+        return self.lm_head(self.ln_f(h))
+
+    def generate(
+        self,
+        prompt: str,
+        max_new_tokens: int = 100,
+        temperature=1.0,
+        top_k=None,
+        tokenizer=None,
+    ):
+        """."""
+        for _ in range(max_new_tokens):
+            start_idx = len(prompt)
+            x = Tensor(
+                np.array([tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})])
+            )
+            y = self(x, start_idx=start_idx)[:, -1, :] / temperature
+            y = y.softmax(dim=1)
+            y = Tensor.multinomial(y, num_samples=1)
+            prompt += tokenizer.decode(y[0])
+        return prompt
 
 
 class TransformerBlock:
@@ -156,9 +267,7 @@ class Transformer:
         # positional embeddings
         self.pe = Embedding(conf.block_size, conf.channels)
         # Transformer Blocks
-        self.tbs = [
-            TransformerBlock(conf) for _ in range(conf.layers)
-        ]
+        self.tbs = [TransformerBlock(conf) for _ in range(conf.layers)]
         # Layer Norm
         self.ln_f = LayerNorm(conf.channels, eps=1e-5)
         # final linear layer
@@ -167,9 +276,7 @@ class Transformer:
     def __call__(self, x: Tensor, start_idx: int = 0):
         """Forward pass of the transformer."""
         _, seqlen = x.shape
-        pos = Tensor(np.arange(start_idx, start_idx + seqlen)).reshape(
-            shape=(1, -1)
-        )
+        pos = Tensor(np.arange(start_idx, start_idx + seqlen)).reshape(shape=(1, -1))
         x = self.te(x) + self.pe(pos)
 
         # mask = Tensor(np.ones((x.shape[1], x.shape[1])).astype(dtype=np.float32)).tril() if seqlen > 1 else None
@@ -247,20 +354,40 @@ def main():
     model_type = "gpt2"
     # n_layer, n_head and n_embd are determined from model_type
     conf_args = {
-        'gpt2':         dict(layers=12, heads=12, channels=768),   # 124M params
-        'gpt2-medium':  dict(layers=24, heads=16, channels=1024),  # 350M params
-        'gpt2-large':   dict(layers=36, heads=20, channels=1280),  # 774M params
-        'gpt2-xl':      dict(layers=48, heads=25, channels=1600),  # 1558M params
+        "gpt2": dict(layers=12, heads=12, channels=768),  # 124M params
+        "gpt2-medium": dict(layers=24, heads=16, channels=1024),  # 350M params
+        "gpt2-large": dict(layers=36, heads=20, channels=1280),  # 774M params
+        "gpt2-xl": dict(layers=48, heads=25, channels=1600),  # 1558M params
     }[model_type]
-    conf_args['vocab_size'] = 50257  # always 50257 for GPT model checkpoints
-    conf_args['block_size'] = 1024   # always 1024 for GPT model checkpoints
-    conf_args['bias'] = True         # always True for GPT model checkpoints
+    conf_args["vocab_size"] = 50257  # always 50257 for GPT model checkpoints
+    conf_args["block_size"] = 1024  # always 1024 for GPT model checkpoints
+    conf_args["bias"] = True  # always True for GPT model checkpoints
 
     conf = GPTConfig(**conf_args)
-
-    transformer = Transformer(conf)
-
+    gpt = GPT(conf)
+    # load pretrained weights
     weights = torch_load(fetch_as_file(get_url(model_type)))
+
+    transposed = [
+        "attn.c_attn.weight",
+        "attn.c_proj.weight",
+        "mlp.c_fc.weight",
+        "mlp.c_proj.weight",
+    ]
+    for k in weights.keys():
+        if any(k.endswith(w) for w in transposed):
+            weights[k] = Tensor(weights[k].numpy().T)
+    # lm head and wte are tied
+    weights["lm_head.weight"] = Tensor(weights["wte.weight"].numpy())
+    load_state_dict(gpt, weights)
+
+    # generate
+    print("\nGPT2: \n")
+    out = gpt.generate("Do I love clara?", 200, tokenizer=tokenizer)
+    print(out, "\n")
+
+    # model
+    transformer = Transformer(conf)
     # train
     train_d, _, _ = datasets()
     x, y = get_train_batch(train_d)
