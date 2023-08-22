@@ -1,6 +1,25 @@
+import argparse
 import os
 from tqdm import tqdm
 import tempfile
+
+
+def create_arg_parser():
+    """Get arguments from command lines."""
+    parser = argparse.ArgumentParser(description="GPT-X")
+    parser.add_argument(
+        "-v",
+        "--verbose",
+        help="Be verbose",
+        action="store_true",
+        dest="loglevel",
+    )
+    return parser
+
+
+def get_url(model_size: str = "gpt2"):
+    """Get model url from huggingface."""
+    return f"https://huggingface.co/{model_size}/resolve/main/pytorch_model.bin"
 
 
 def temp(x: str) -> str:
