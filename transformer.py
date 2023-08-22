@@ -8,7 +8,7 @@ from typing import Optional
 import numpy as np
 import tiktoken
 from tinygrad.nn import Embedding, Linear
-from tinygrad.state import load_state_dict, torch_load
+from tinygrad.nn.state import load_state_dict, torch_load
 from tinygrad.tensor import Tensor
 
 from utils import fetch_as_file
@@ -129,6 +129,7 @@ class GPTBlock:
     ) -> Tensor:
         x = x + self.attn(self.ln_1(x))
         x = x + self.mlp(self.ln_2(x))
+        return x
 
 
 class GPT:
@@ -149,10 +150,15 @@ class GPT:
         _, seqlen = x.shape
         pos = Tensor(np.arange(start_idx, start_idx + seqlen)).reshape(shape=(1, -1))
         h = self.wte(x) + self.wpe(pos)
-        print(h)
 
-        # mask = Tensor.full((1, 1, seqlen, start_idx + seqlen), float("-inf")).triu(start_idx + 1).realize() if seqlen > 1 else None
-        mask = None
+        mask = (
+            Tensor.full((1, 1, seqlen, start_idx + seqlen), float("-inf"))
+            .triu(start_idx + 1)
+            .realize()
+            if seqlen > 1
+            else None
+        )
+        # mask = None
         h = h.sequential(
             [functools.partial(n, start_idx=start_idx, mask=mask) for n in self.h]
         )
@@ -162,21 +168,27 @@ class GPT:
         self,
         prompt: str,
         max_new_tokens: int = 100,
-        temperature=1.0,
+        temp=0.8,
         top_k=None,
         tokenizer=None,
     ):
-        """."""
+        """Generating sequence of words."""
+        toks = tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})
+        start_idx = 0
         for _ in range(max_new_tokens):
-            start_idx = len(prompt)
-            x = Tensor(
-                np.array([tokenizer.encode(prompt, allowed_special={"<|endoftext|>"})])
-            )
-            y = self(x, start_idx=start_idx)[:, -1, :] / temperature
-            y = y.softmax(dim=1)
-            y = Tensor.multinomial(y, num_samples=1)
-            prompt += tokenizer.decode(y[0])
-        return prompt
+            print(start_idx)
+            x = Tensor([toks[start_idx:]])
+            y = self(x, start_idx=start_idx)[:, -1, :] / temp
+            # very last layer
+            probs = (y / temp).softmax()
+            probs = probs.numpy().flatten()
+            y = int(np.random.choice(len(probs), p=probs))
+
+            start_idx = len(toks)
+            toks.append(y)
+
+            res = tokenizer.decode(toks)
+        return res
 
 
 class TransformerBlock:
@@ -383,7 +395,7 @@ def main():
 
     # generate
     print("\nGPT2: \n")
-    out = gpt.generate("Do I love clara?", 200, tokenizer=tokenizer)
+    out = gpt.generate("Are you the problem?", 200, tokenizer=tokenizer)
     print(out, "\n")
 
     # model
