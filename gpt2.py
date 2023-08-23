@@ -1,5 +1,6 @@
 # GPT-2
 import functools
+import sys
 from dataclasses import dataclass
 from typing import Optional
 
@@ -179,6 +180,13 @@ class GPT:
 
 
 if __name__ == "__main__":
+    # Parse command line arguements.
+    arg_parser = create_arg_parser()
+    args = arg_parser.parse_args(sys.argv[1:])
+
+    if not (p := args.p):
+        p = "Are you the problem?"
+
     model_type = "gpt2"
     # n_layer, n_head and n_embd are determined from model_type
     conf_args = {
@@ -212,5 +220,5 @@ if __name__ == "__main__":
     tokenizer = tiktoken.get_encoding("gpt2")
     # generate
     print("\nGPT2: \n")
-    out = gpt.generate("Are you the problem?", 150, tokenizer=tokenizer)
+    out = gpt.generate(p, 150, tokenizer=tokenizer)
     print(out, "\n")

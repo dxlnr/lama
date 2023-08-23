@@ -14,6 +14,7 @@ def create_arg_parser():
         action="store_true",
         dest="loglevel",
     )
+    parser.add_argument("-p", type=str, help="input prompt.")
     return parser
 
 
