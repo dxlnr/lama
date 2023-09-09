@@ -56,7 +56,7 @@ In a second step these input encodings get summed with a tensor encoding the pos
 (3) **Attention Mechanism**
 
 The attention mechanism mimics the retrieval of a **value** $v_i$ for a **query** $q$ based on a *key* $k_i$ in some data(base).
-    $$ attention(q,k,v) = \sum_i similarity(q, k_i) \times v_i $$
+    $ attention(q,k,v) = \sum_i similarity(q, k_i) \times v_i $
 ```
                   Data 
                 (k1, v1)
@@ -82,15 +82,16 @@ For the similarity a distribution over all the keys for a certain query is compu
         k1      k2      k3      k4      ..      kn
 ```
 
-For calculating the *similarity* $s_i$ various functions are possible.
-$$
+For calculating the $similarity s_i$ various functions are possible.
+
+$
 s_i = f(q, k_i) = \begin{cases}
     q^T k_i & \text{dot product} \\
     q^T k_i / \sqrt(d) & \text{scaled dot product} \\
     q^T Wk_i & \text{general dot product} \\
     w^T_q q + w^T_k k_i & \text{additive similarity}
 \end{cases}
-$$
+$
 
 (4) **Multi-Head Attention**
 
